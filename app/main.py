@@ -1,4 +1,4 @@
-from fastapi import FastAPI
+from fastapi import FastAPI, status
 from . import models
 from .database import engine
 from .routers import post, user, auth
@@ -25,4 +25,4 @@ app.include_router(auth.router)
 
 @app.get("/")
 def read_root():
-    return {"message": "Hello World!!!!"}
+    return {"message": "Hello World!"}
