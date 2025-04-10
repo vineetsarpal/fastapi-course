@@ -1,78 +1,60 @@
 name: Build and Deploy FastAPI app
 
 on:
-  push:
-    branches:
-      - main
+    push:
+      branches:
+        - main
 
 jobs:
-  build:
-    runs-on: ubuntu-latest
-    outputs:
-      image_tag: ${{ steps.set_tag.outputs.sha }}
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
+    build-and-deploy:
+        runs-on: ubuntu-latest
+        environment:
+            name: Production
+        steps:
+            - name: Checkout code
+              uses: actions/checkout@v4
 
-      - name: Set up QEMU
-        uses: docker/setup-qemu-action@v3
+            - name: Set up Docker Buildx
+              uses: docker/setup-buildx-action@v3
+              with:
+                driver: docker-container
+                platforms: linux/amd64,linux/arm64
 
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
-        with:
-          driver: docker-container
-          platforms: linux/amd64,linux/arm64
+            - name: Login to DockerHub
+              uses: docker/login-action@v3
+              with:
+                username: ${{ secrets.DOCKERHUB_USERNAME }}
+                password: ${{ secrets.DOCKERHUB_TOKEN }}
 
-      - name: Login to DockerHub
-        uses: docker/login-action@v3
-        with:
-          username: ${{ secrets.DOCKERHUB_USERNAME }}
-          password: ${{ secrets.DOCKERHUB_TOKEN }}
+            - name: Build and Push Docker image
+              uses: docker/build-push-action@v4
+              with:
+                context: .
+                push: true
+                tags: |
+                    ${{ secrets.DOCKERHUB_USERNAME }}/fastapi-course:latest
+                    ${{ secrets.DOCKERHUB_USERNAME }}/fastapi-course:${{ steps.set_tag.outputs.sha }}
+                cache-from: type=registry,ref=${{ secrets.DOCKERHUB_USERNAME }}/fastapi-course:buildcache
+                cache-to: type=registry,ref=${{ secrets.DOCKERHUB_USERNAME }}/fastapi-course:buildcache,mode=max
 
-      - name: Set image tag
-        id: set_tag
-        run: echo "sha=$(git rev-parse --short HEAD)" >> $GITHUB_OUTPUT
-
-      - name: Build and Push Docker image
-        uses: docker/build-push-action@v4
-        with:
-          context: .
-          push: true
-          platforms: linux/amd64,linux/arm64
-          tags: |
-            ${{ secrets.DOCKERHUB_USERNAME }}/fastapi-course:latest
-            ${{ secrets.DOCKERHUB_USERNAME }}/fastapi-course:${{ steps.set_tag.outputs.sha }}
-          cache-from: type=registry,ref=${{ secrets.DOCKERHUB_USERNAME }}/fastapi-course:buildcache
-          cache-to: type=registry,ref=${{ secrets.DOCKERHUB_USERNAME }}/fastapi-course:buildcache,mode=max
-
-  deploy:
-    runs-on: ubuntu-latest
-    needs: build
-    environment:
-      name: Production
-    steps:
-      - name: Deploy to Ubuntu server
-        uses: appleboy/ssh-action@v1
-        with:
-          host: ${{ secrets.PROD_HOST }}
-          username: ${{ secrets.PROD_USERNAME }}
-          key: ${{ secrets.SSH_PRIVATE_KEY }}
-          script: |
-            echo "Deploying version: ${{ needs.build.outputs.image_tag }}"
-            # Stop and remove existing container
-            docker stop fastapi-container || true
-            docker rm fastapi-container || true
-            
-            # Pull the specific version
-            docker pull ${{ secrets.DOCKERHUB_USERNAME }}/fastapi-course:${{ needs.build.outputs.image_tag }}
-            
-            # Run the new container
-            docker run -d \
-                --name fastapi-container \
-                -p 8000:8000 \
-                --restart unless-stopped \
-                ${{ secrets.DOCKERHUB_USERNAME }}/fastapi-course:${{ needs.build.outputs.image_tag }}
-
-            # Verify deployment
-            docker ps -a | grep fastapi-container
-            curl --retry 5 --retry-delay 5 --max-time 10 http://localhost:8000/health
+            - name: Deploy to Ubuntu server
+              uses: appleboy/ssh-action@v1
+              with:
+                host: ${{ secrets.PROD_HOST }}
+                username: ${{ secrets.PROD_USERNAME }}
+                key: ${{ secrets.SSH_PRIVATE_KEY }}
+                script: |
+                    whoami
+                    # Stop and remove existing container if it exists
+                    docker stop fastapi-container || true
+                    docker rm fastapi-container || true
+                    
+                    # Pull the latest image
+                    docker pull ${{ secrets.DOCKERHUB_USERNAME }}/fastapi-course:latest
+                    
+                    # Run the new container
+                    docker run -d \
+                        --name fastapi-container \
+                        -p 8000:8000 \
+                        --restart unless-stopped \
+                        ${{ secrets.DOCKERHUB_USERNAME }}/fastapi-course:latest
