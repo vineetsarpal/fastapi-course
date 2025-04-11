@@ -51,12 +51,17 @@ jobs:
           host: ${{ secrets.PROD_HOST }}
           username: ${{ secrets.PROD_USERNAME }}
           key: ${{ secrets.SSH_PRIVATE_KEY }}
-          script: |
+         script: |
             mkdir -p ~/app
+            
+            # Transfer docker-compose.yml via SCP
+            scp -o StrictHostKeyChecking=no docker-compose.yml ${{ secrets.PROD_USER }}@${{ secrets.PROD_HOST }}:~/app/
+            
             cd ~/app
             
             # Create .env file from secrets
-            echo "DATABASE_HOST=postgres" > .env
+            rm -f .env  # Remove old .env file if it exists
+            echo "DATABASE_HOST=postgres" >> .env
             echo "DATABASE_PORT=5432" >> .env
             echo "DATABASE_NAME=${{ secrets.DATABASE_NAME }}" >> .env
             echo "DATABASE_USER=${{ secrets.DATABASE_USER }}" >> .env
@@ -65,8 +70,9 @@ jobs:
             echo "ALGORITHM=${{ secrets.ALGORITHM }}" >> .env
             echo "ACCESS_TOKEN_EXPIRE_MINUTES=${{ secrets.ACCESS_TOKEN_EXPIRE_MINUTES }}" >> .env
             
-            # Pull latest images
-            docker compose pull
+            # Secure .env file permissions
+            chmod 600 .env
             
-            # Deploy with Docker Compose
-            docker compose -f docker-compose.yml up -d --force-recreate
+            # Pull latest images and deploy with Docker Compose
+            docker compose --env-file ~/app/.env -f docker-compose.yml pull
+            docker compose --env-file ~/app/.env -f docker-compose.yml up -d --force-recreate
