@@ -45,34 +45,32 @@ jobs:
     needs: build
     environment: Production
     steps:
-      - name: Deploy to Ubuntu server
-        uses: appleboy/ssh-action@v1
-        with:
-          host: ${{ secrets.PROD_HOST }}
-          username: ${{ secrets.PROD_USERNAME }}
-          key: ${{ secrets.SSH_PRIVATE_KEY }}
-          script: |
-            mkdir -p ~/app
-            
-            # Transfer docker-compose.yml via SCP
-            scp -o StrictHostKeyChecking=no docker-compose.yml ${{ secrets.PROD_USER }}@${{ secrets.PROD_HOST }}:~/app/
-            
-            cd ~/app
-            
-            # Create .env file from secrets
-            rm -f .env  # Remove old .env file if it exists
-            echo "DATABASE_HOST=postgres" >> .env
-            echo "DATABASE_PORT=5432" >> .env
-            echo "DATABASE_NAME=${{ secrets.DATABASE_NAME }}" >> .env
-            echo "DATABASE_USER=${{ secrets.DATABASE_USER }}" >> .env
-            echo "DATABASE_PASSWORD=${{ secrets.DATABASE_PASSWORD }}" >> .env
-            echo "SECRET_KEY=${{ secrets.SECRET_KEY }}" >> .env
-            echo "ALGORITHM=${{ secrets.ALGORITHM }}" >> .env
-            echo "ACCESS_TOKEN_EXPIRE_MINUTES=${{ secrets.ACCESS_TOKEN_EXPIRE_MINUTES }}" >> .env
-            
-            # Secure .env file permissions
-            chmod 600 .env
-            
-            # Pull latest images and deploy with Docker Compose
-            docker compose --env-file ~/app/.env -f docker-compose.yml pull
-            docker compose --env-file ~/app/.env -f docker-compose.yml up -d --force-recreate
+        - name: Deploy to Ubuntu server
+          uses: appleboy/ssh-action@v1
+          with:
+            script: |
+                mkdir -p ~/app
+                
+                # Transfer compose file using rsync (more reliable than SCP)
+                rsync -avz -e "ssh -o StrictHostKeyChecking=no" \
+                    ./docker-compose.yml \
+                    ${{ secrets.PROD_USER }}@${{ secrets.PROD_HOST }}:~/app/
+                
+                cd ~/app
+                
+                # Create .env file (overwrite if exists)
+                cat <<EOF > .env
+                DATABASE_HOST=postgres
+                DATABASE_PORT=5432
+                DATABASE_NAME=${{ secrets.DATABASE_NAME }}
+                DATABASE_USER=${{ secrets.DATABASE_USER }}
+                DATABASE_PASSWORD=${{ secrets.DATABASE_PASSWORD }}
+                SECRET_KEY=${{ secrets.SECRET_KEY }}
+                ALGORITHM=${{ secrets.ALGORITHM }}
+                ACCESS_TOKEN_EXPIRE_MINUTES=${{ secrets.ACCESS_TOKEN_EXPIRE_MINUTES }}
+                EOF
+                
+                chmod 600 .env
+                docker compose pull
+                docker compose up -d --force-recreate
+      
