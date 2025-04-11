@@ -51,7 +51,7 @@ jobs:
           host: ${{ secrets.PROD_HOST }}
           username: ${{ secrets.PROD_USERNAME }}
           key: ${{ secrets.SSH_PRIVATE_KEY }}
-         script: |
+          script: |
             mkdir -p ~/app
             
             # Transfer docker-compose.yml via SCP
