@@ -1,0 +1,158 @@
+name: Build and Deploy FastAPI app
+
+on:
+  push:
+    branches:
+      - main
+jobs:
+  build:
+    environment:
+      name: Testing
+    env:
+      DATABASE_HOSTNAME: ${{secrets.DATABASE_HOSTNAME}}
+      DATABASE_PORT: ${{secrets.DATABASE_PORT}}
+      DATABASE_PASSWORD: ${{secrets.DATABASE_PASSWORD}}
+      DATABASE_NAME: ${{secrets.DATABASE_NAME}}
+      DATABASE_USERNAME: ${{secrets.DATABASE_USERNAME}}
+      SECRET_KEY: ${{secrets.SECRET_KEY}}
+      ALGORITHM: ${{secrets.ALGORITHM}}
+      ACCESS_TOKEN_EXPIRE_MINUTES: ${{secrets.ACCESS_TOKEN_EXPIRE_MINUTES}}
+
+      # This is an ephemeral test db. It is a postgres service container spun up just for the runner
+    services:
+      postgres:
+        image: postgres
+        env:
+          POSTGRES_PASSWORD: ${{secrets.DATABASE_PASSWORD}}
+          POSTGRES_DB: ${{secrets.DATABASE_NAME}}_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    runs-on: ubuntu-latest
+    steps:
+      - name: pulling git repo
+        uses: actions/checkout@v4
+
+      - name: Install python version 3.9
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: update pip
+        run: python -m pip install --upgrade pip
+
+      - name: install all dependencies
+        run: pip install -r requirements.txt
+
+        # Note: If a test fails in this step, the workflow does NOT continue. Which is good since we don't want broken code to be deployed
+      - name: test with pytest
+        run: |
+          pip install pytest
+          pytest
+
+  deploy:
+    runs-on: ubuntu-latest
+    needs: [build]
+    environment:
+      name: Production
+    steps:
+      - name: pulling git repo
+        uses: actions/checkout@v4
+
+      - name: deploy to ubuntu server
+        uses: appleboy/ssh-action@v1
+        with:
+          host: ${{secrets.PROD_HOST}}
+          username: ${{secrets.PROD_USERNAME}}
+          password: ${{secrets.PROD_PASSWORD}}
+          script: |
+            cd app/src
+            git pull
+            echo ${{secrets.PROD_PASSWORD}} | sudo -S systemctl restart api
+      # login to our ubuntu
+      # cd /app/src
+      # git pull
+      # systemctl restart api
+
+
+# # CI/CD with Docker push to DockerHub and pulling the image on VPS
+# on:
+#   push:
+#     branches:
+#       - main
+
+# jobs:
+#   build:
+#     runs-on: ubuntu-latest
+#     environment: Production
+#     steps:
+#       - name: Checkout code
+#         uses: actions/checkout@v4
+    
+#     # For multi-arch docker images
+#     #   - name: Set up QEMU
+#     #     uses: docker/setup-qemu-action@v3
+
+#       - name: Set up Docker Buildx
+#         uses: docker/setup-buildx-action@v3
+#         with:
+#           driver: docker-container
+#         #   platforms: linux/arm64,linux/amd64
+
+#       - name: Login to DockerHub
+#         uses: docker/login-action@v3
+#         with:
+#           username: ${{ secrets.DOCKERHUB_USERNAME }}
+#           password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+#       - name: Build and Push Docker image
+#         uses: docker/build-push-action@v4
+#         with:
+#         #   platforms: linux/arm64,linux/amd64
+#           context: .
+#           push: true
+#           tags: |
+#             ${{ secrets.DOCKERHUB_USERNAME }}/fastapi-course:latest
+#             ${{ secrets.DOCKERHUB_USERNAME }}/fastapi-course:${{ github.sha }}
+#           cache-from: type=registry,ref=${{ secrets.DOCKERHUB_USERNAME }}/fastapi-course:buildcache
+#           cache-to: type=registry,ref=${{ secrets.DOCKERHUB_USERNAME }}/fastapi-course:buildcache,mode=max
+
+#   deploy:
+#     runs-on: ubuntu-latest
+#     needs: build
+#     environment: Production
+#     steps:
+#         - name: Deploy to Ubuntu server
+#           uses: appleboy/ssh-action@v1
+#           with:
+#             script: |
+#                 mkdir -p ~/app
+                
+#                 # Transfer compose file using rsync (more reliable than SCP)
+#                 rsync -avz -e "ssh -o StrictHostKeyChecking=no" \
+#                     ./docker-compose.yml \
+#                     ${{ secrets.PROD_USER }}@${{ secrets.PROD_HOST }}:~/app/
+                
+#                 cd ~/app
+                
+#                 # Create .env file (overwrite if exists)
+#                 cat <<EOF > .env
+#                 DATABASE_HOST=postgres
+#                 DATABASE_PORT=5432
+#                 DATABASE_NAME=${{ secrets.DATABASE_NAME }}
+#                 DATABASE_USER=${{ secrets.DATABASE_USER }}
+#                 DATABASE_PASSWORD=${{ secrets.DATABASE_PASSWORD }}
+#                 SECRET_KEY=${{ secrets.SECRET_KEY }}
+#                 ALGORITHM=${{ secrets.ALGORITHM }}
+#                 ACCESS_TOKEN_EXPIRE_MINUTES=${{ secrets.ACCESS_TOKEN_EXPIRE_MINUTES }}
+#                 EOF
+                
+#                 chmod 600 .env
+#                 docker compose pull
+#                 docker compose up -d --force-recreate
+      
